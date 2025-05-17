@@ -1,0 +1,63 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        SONAR_TOKEN = credentials('SONAR_TOKEN') // Recommended for security
+    }
+
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'main', changelog: false, poll: false, url: 'https://github.com/sahanadinku/Ekart.git'
+            }
+        }
+
+        stage('Compile') {
+            steps {
+                sh "mvn clean compile"
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                sh '''
+                    $SCANNER_HOME/bin/sonar-scanner \
+                      -Dsonar.projectKey=shopping-cart \
+                      -Dsonar.projectName=shopping-cart \
+                      -Dsonar.java.binaries=target/classes \
+                      -Dsonar.host.url=http://52.66.152.99:9000 \
+                      -Dsonar.login=$SONAR_TOKEN \
+                      -Dsonar.scanner.skipJavaRuntime=true
+                '''
+            }
+        }
+
+        stage('OWASP Dependency check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+
+        stage('Build Docker') {
+            steps {
+                sh "mvn clean install -DskipTests=true"
+            }
+        }
+        stage('Build and push Docker image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: '4e8ee73d-2a14-48c5-b9c0-0ddcf5a6c621', toolName: 'docker') {
+                        sh "docker build -t shopping:latest -f docker/Dockerfile ."
+                        sh "docker tag shopping:latest sahanasv1896/shopping:latest"
+                        sh "docker push sahanasv1896/shopping:latest"
+                    }
+                }
+            }
+        }
+    }
+}
